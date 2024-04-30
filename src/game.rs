@@ -5,12 +5,18 @@ use bevy::{
     window::PrimaryWindow,
 };
 
+use self::events::Bounce;
+
+mod events;
+
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_camera, spawn_ball))
-            .add_systems(Update, (screen_rebound, move_object, collide_ball_paddle));
+            .add_systems(Update, (screen_rebound, collide_ball_paddle))
+            .add_systems(FixedUpdate, move_object)
+            .add_event::<Bounce>();
     }
 }
 
@@ -55,7 +61,7 @@ fn spawn_ball(
             ..default()
         },
         Ball,
-        Velocity(Vec2::new(1., 1.)),
+        Velocity(Vec2::new(4., 2.)),
     ));
 
     let half_width = window.width() / 2.;
@@ -100,6 +106,7 @@ fn move_object(mut balls: Query<(&mut Transform, &Velocity)>) {
 
 fn screen_rebound(
     mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
+    mut bounce_events: EventWriter<Bounce>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
     let window = window.single();
@@ -109,9 +116,16 @@ fn screen_rebound(
 
     for (transform, mut velocity) in balls.iter_mut() {
         if transform.translation.x > width / 2. || transform.translation.x < -width / 2. {
+            bounce_events.send(Bounce {
+                position: transform.translation,
+            });
+
             velocity.0.x = -velocity.0.x;
         }
         if transform.translation.y > height / 2. || transform.translation.y < -height / 2. {
+            bounce_events.send(Bounce {
+                position: transform.translation,
+            });
             velocity.0.y = -velocity.0.y;
         }
     }
@@ -120,6 +134,7 @@ fn screen_rebound(
 fn collide_ball_paddle(
     paddles: Query<(&Transform, &Paddle)>,
     mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
+    mut bounce_events: EventWriter<Bounce>,
 ) {
     for (ball_transform, mut velocity) in &mut balls {
         for (paddle_tranrform, baddle) in &paddles {
@@ -141,6 +156,10 @@ fn collide_ball_paddle(
                 && ball.y + ball_radius > paddle_y
                 && ball.y - ball_radius < paddle_y_max
             {
+                bounce_events.send(Bounce {
+                    position: ball_transform.translation,
+                });
+
                 velocity.0.x = -velocity.0.x;
             }
         }
