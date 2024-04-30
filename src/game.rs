@@ -4,6 +4,8 @@ use bevy::{
     sprite::MaterialMesh2dBundle,
     window::PrimaryWindow,
 };
+use bevy_xpbd_2d::prelude::*;
+use leafwing_input_manager::prelude::*;
 
 use self::events::Bounce;
 
@@ -14,10 +16,18 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_camera, spawn_ball))
-            .add_systems(Update, (screen_rebound, collide_ball_paddle))
-            .add_systems(FixedUpdate, move_object)
+            .add_plugins(PhysicsPlugins::default())
+            .add_systems(Update, move_paddles)
+            .add_plugins(InputManagerPlugin::<GameAction>::default())
+            .insert_resource(Gravity(Vec2::ZERO))
             .add_event::<Bounce>();
     }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Actionlike, Reflect, Copy)]
+enum GameAction {
+    PaddleUp,
+    PaddleDown,
 }
 
 fn spawn_camera(mut commands: Commands) {
@@ -44,7 +54,10 @@ struct Paddle {
 }
 
 #[derive(Component, Clone)]
-struct Velocity(Vec2);
+struct LeftWall;
+
+#[derive(Component, Clone)]
+struct RightWall;
 
 fn spawn_ball(
     mut commands: Commands,
@@ -61,10 +74,89 @@ fn spawn_ball(
             ..default()
         },
         Ball,
-        Velocity(Vec2::new(4., 2.)),
+        RigidBody::Dynamic,
+        Collider::circle(20.),
+        LinearVelocity::from(Vec2::new(100., 33.)),
+        Restitution::PERFECTLY_ELASTIC,
     ));
 
-    let half_width = window.width() / 2.;
+    // Walls
+    let square_sprite = Sprite {
+        color: Color::rgb(0.7, 0.7, 0.8),
+        custom_size: Some(Vec2::splat(50.0)),
+        ..default()
+    };
+
+    let window_width = window.width();
+    let window_height = window.height();
+
+    let half_width = window_width / 2.;
+    let half_height = window_height / 2.;
+
+    commands.spawn((
+        SpriteBundle {
+            sprite: square_sprite.clone(),
+            transform: Transform::from_xyz(0.0, half_height, 0.0).with_scale(Vec3::new(
+                window_width,
+                1.0,
+                1.0,
+            )),
+            ..default()
+        },
+        RigidBody::Static,
+        Collider::rectangle(window_width, 50.0),
+        Restitution::PERFECTLY_ELASTIC,
+    ));
+
+    // Floor
+    commands.spawn((
+        SpriteBundle {
+            sprite: square_sprite.clone(),
+            transform: Transform::from_xyz(0.0, -half_height, 0.0).with_scale(Vec3::new(
+                window_width,
+                1.0,
+                1.0,
+            )),
+            ..default()
+        },
+        RigidBody::Static,
+        Collider::rectangle(window_width, 50.0),
+        Restitution::PERFECTLY_ELASTIC,
+    ));
+
+    // Left wall
+    commands.spawn((
+        SpriteBundle {
+            sprite: square_sprite.clone(),
+            transform: Transform::from_xyz(half_width, half_height, 0.0).with_scale(Vec3::new(
+                1.0,
+                window.width(),
+                1.0,
+            )),
+            ..default()
+        },
+        RigidBody::Static,
+        Collider::rectangle(50.0, window_height),
+        Restitution::PERFECTLY_ELASTIC,
+        LeftWall,
+    ));
+
+    // Right wall
+    commands.spawn((
+        SpriteBundle {
+            sprite: square_sprite,
+            transform: Transform::from_xyz(-half_width, half_height, 0.0).with_scale(Vec3::new(
+                1.0,
+                window.width(),
+                1.0,
+            )),
+            ..default()
+        },
+        RigidBody::Static,
+        Collider::rectangle(50.0, window_height),
+        Restitution::PERFECTLY_ELASTIC,
+        RightWall,
+    ));
 
     info!("Half width: {}", half_width);
 
@@ -72,6 +164,18 @@ fn spawn_ball(
         width: 20.,
         height: 320.,
     };
+
+    // Paddles
+    //
+    let right_input_map = InputMap::new([
+        (GameAction::PaddleUp, KeyCode::KeyY),
+        (GameAction::PaddleDown, KeyCode::KeyI),
+    ]);
+
+    let left_input_map = InputMap::new([
+        (GameAction::PaddleUp, KeyCode::KeyW),
+        (GameAction::PaddleDown, KeyCode::KeyR),
+    ]);
 
     commands.spawn((
         MaterialMesh2dBundle {
@@ -82,7 +186,11 @@ fn spawn_ball(
             material: materials.add(Color::rgb(0.0, 7.5, 7.5)),
             ..default()
         },
+        RigidBody::Kinematic,
+        Collider::rectangle(paddle.width, paddle.height),
+        Restitution::PERFECTLY_ELASTIC,
         paddle,
+        InputManagerBundle::with_map(left_input_map),
     ));
 
     commands.spawn((
@@ -94,74 +202,25 @@ fn spawn_ball(
             material: materials.add(Color::rgb(7.5, 7.5, 0.0)),
             ..default()
         },
+        RigidBody::Kinematic,
+        Collider::rectangle(paddle.width, paddle.height),
+        Restitution::PERFECTLY_ELASTIC,
         paddle,
+        InputManagerBundle::with_map(right_input_map),
     ));
 }
 
-fn move_object(mut balls: Query<(&mut Transform, &Velocity)>) {
-    for (mut transform, velocity) in balls.iter_mut() {
-        transform.translation += velocity.0.extend(0.);
-    }
-}
+fn move_paddles(mut paddles: Query<(&ActionState<GameAction>, &mut LinearVelocity), With<Paddle>>) {
+    let speed = 500.;
 
-fn screen_rebound(
-    mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
-    mut bounce_events: EventWriter<Bounce>,
-    window: Query<&Window, With<PrimaryWindow>>,
-) {
-    let window = window.single();
+    for (action_state, mut velocity) in paddles.iter_mut() {
+        velocity.0 = Vec2::ZERO;
 
-    let height = window.height();
-    let width = window.width();
-
-    for (transform, mut velocity) in balls.iter_mut() {
-        if transform.translation.x > width / 2. || transform.translation.x < -width / 2. {
-            bounce_events.send(Bounce {
-                position: transform.translation,
-            });
-
-            velocity.0.x = -velocity.0.x;
+        if action_state.pressed(&GameAction::PaddleUp) {
+            velocity.0 += Vec2::Y * speed;
         }
-        if transform.translation.y > height / 2. || transform.translation.y < -height / 2. {
-            bounce_events.send(Bounce {
-                position: transform.translation,
-            });
-            velocity.0.y = -velocity.0.y;
-        }
-    }
-}
-
-fn collide_ball_paddle(
-    paddles: Query<(&Transform, &Paddle)>,
-    mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
-    mut bounce_events: EventWriter<Bounce>,
-) {
-    for (ball_transform, mut velocity) in &mut balls {
-        for (paddle_tranrform, baddle) in &paddles {
-            let ball = ball_transform.translation;
-            let paddle = paddle_tranrform.translation;
-
-            let ball_radius = 20.;
-            let paddle_width = baddle.width;
-            let paddle_height = baddle.height;
-
-            let paddle_x = paddle.x - paddle_width / 2.;
-            let paddle_y = paddle.y - paddle_height / 2.;
-
-            let paddle_x_max = paddle_x + paddle_width;
-            let paddle_y_max = paddle_y + paddle_height;
-
-            if ball.x + ball_radius > paddle_x
-                && ball.x - ball_radius < paddle_x_max
-                && ball.y + ball_radius > paddle_y
-                && ball.y - ball_radius < paddle_y_max
-            {
-                bounce_events.send(Bounce {
-                    position: ball_transform.translation,
-                });
-
-                velocity.0.x = -velocity.0.x;
-            }
+        if action_state.pressed(&GameAction::PaddleDown) {
+            velocity.0 -= Vec2::Y * speed;
         }
     }
 }
