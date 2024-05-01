@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     prelude::*,
@@ -10,7 +12,7 @@ use leafwing_input_manager::prelude::*;
 use super::{
     components::{Ball, LeftWall, Paddle, RightWall, Side},
     events::ScoreGoal,
-    GameAction, Score,
+    GameAction, LastPong, Score,
 };
 
 pub mod ui;
@@ -27,6 +29,51 @@ pub fn spawn_camera(mut commands: Commands) {
         },
         BloomSettings::default(),
     ));
+}
+
+pub fn accelerate_with_time(
+    mut balls: Query<&mut LinearVelocity, With<Ball>>,
+    time: Res<Time<Fixed>>,
+) {
+    for mut ball_velocity in &mut balls {
+        ball_velocity.0 *= Vec2::splat(time.delta_seconds()) * 0.05 + Vec2::splat(1.0);
+    }
+}
+
+pub fn update_last_hit(mut last_pong: ResMut<LastPong>, time: Res<Time<Fixed>>) {
+    last_pong.last += time.delta();
+}
+
+pub fn respawn_ball_on_lock(
+    mut commands: Commands,
+    mut last_pong: ResMut<LastPong>,
+    balls: Query<Entity, With<Ball>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    let lock_maximum = Duration::from_secs_f32(20.);
+
+    if last_pong.last > lock_maximum {
+        for ball in balls.iter() {
+            info!("Despawning ball");
+            commands.entity(ball).despawn();
+        }
+
+        last_pong.last = Duration::default();
+
+        commands.spawn((
+            MaterialMesh2dBundle {
+                mesh: meshes.add(Circle::new(20.)).into(),
+                material: materials.add(Color::rgb(7.5, 0.0, 7.5)),
+                ..default()
+            },
+            Ball,
+            RigidBody::Dynamic,
+            Collider::circle(20.),
+            LinearVelocity::from(Vec2::new(100., 33.)),
+            Restitution::PERFECTLY_ELASTIC,
+        ));
+    }
 }
 
 pub fn score_goal(
@@ -184,7 +231,7 @@ pub fn spawn_ball(
 
     let paddle = Paddle {
         width: 20.,
-        height: 320.,
+        height: 210.,
     };
 
     // Paddles
@@ -235,6 +282,7 @@ pub fn spawn_ball(
 pub fn rebound(
     mut collision_events: EventReader<Collision>,
     mut balls: Query<(&Transform, &mut LinearVelocity), With<Ball>>,
+    mut last_pong: ResMut<LastPong>,
     paddles: Query<(Entity, &Transform), With<Paddle>>,
 ) {
     for Collision(contact) in collision_events.read() {
@@ -257,6 +305,7 @@ pub fn rebound(
 
         let paddle_to_ball_direction = ball_transform.translation - paddle_transform.translation;
 
+        last_pong.last = Duration::default();
         velocity.0 += paddle_to_ball_direction.normalize().xy() * 100.0;
     }
 }
