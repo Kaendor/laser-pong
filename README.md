@@ -14,4 +14,6 @@ To play, compile the game with `cargo run --release` and that's it.
 
 - [x] Basic pong game
 - [ ] Respawn the ball when a score is made
+- [ ] Input configuration
+- [ ] Juice
 - [ ] Add bump to paddles
