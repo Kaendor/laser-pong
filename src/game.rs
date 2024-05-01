@@ -17,7 +17,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_camera, spawn_ball))
             .add_plugins(PhysicsPlugins::default())
-            .add_systems(Update, move_paddles)
+            .add_systems(Update, (move_paddles, rebound))
             .add_plugins(InputManagerPlugin::<GameAction>::default())
             .insert_resource(Gravity(Vec2::ZERO))
             .add_event::<Bounce>();
@@ -173,7 +173,7 @@ fn spawn_ball(
     ]);
 
     let left_input_map = InputMap::new([
-        (GameAction::PaddleUp, KeyCode::KeyW),
+        (GameAction::PaddleUp, KeyCode::KeyZ),
         (GameAction::PaddleDown, KeyCode::KeyR),
     ]);
 
@@ -208,6 +208,35 @@ fn spawn_ball(
         paddle,
         InputManagerBundle::with_map(right_input_map),
     ));
+}
+
+fn rebound(
+    mut collision_events: EventReader<Collision>,
+    mut balls: Query<(&Transform, &mut LinearVelocity), With<Ball>>,
+    paddles: Query<(Entity, &Transform), With<Paddle>>,
+) {
+    for Collision(contact) in collision_events.read() {
+        let Ok((paddle_entity, paddle_transform)) = paddles
+            .get(contact.entity1)
+            .or_else(|_| paddles.get(contact.entity2))
+        else {
+            continue;
+        };
+
+        let ball_entity = if paddle_entity == contact.entity1 {
+            contact.entity2
+        } else {
+            contact.entity1
+        };
+
+        let Ok((ball_transform, mut velocity)) = balls.get_mut(ball_entity) else {
+            continue;
+        };
+
+        let paddle_to_ball_direction = ball_transform.translation - paddle_transform.translation;
+
+        velocity.0 += paddle_to_ball_direction.normalize().xy() * 100.0;
+    }
 }
 
 fn move_paddles(mut paddles: Query<(&ActionState<GameAction>, &mut LinearVelocity), With<Paddle>>) {
