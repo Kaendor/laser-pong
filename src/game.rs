@@ -7,9 +7,14 @@ use bevy::{
 use bevy_xpbd_2d::prelude::*;
 use leafwing_input_manager::prelude::*;
 
-use self::events::Bounce;
+use self::{
+    components::{Ball, LeftWall, Paddle, RightWall},
+    events::Bounce,
+};
 
+mod components;
 mod events;
+mod systems;
 
 pub struct GamePlugin;
 
@@ -25,7 +30,7 @@ impl Plugin for GamePlugin {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Actionlike, Reflect, Copy)]
-enum GameAction {
+pub enum GameAction {
     PaddleUp,
     PaddleDown,
 }
@@ -43,21 +48,6 @@ fn spawn_camera(mut commands: Commands) {
         BloomSettings::default(),
     ));
 }
-
-#[derive(Component, Clone, Copy)]
-struct Ball;
-
-#[derive(Component, Copy, Clone)]
-struct Paddle {
-    width: f32,
-    height: f32,
-}
-
-#[derive(Component, Clone)]
-struct LeftWall;
-
-#[derive(Component, Clone)]
-struct RightWall;
 
 fn spawn_ball(
     mut commands: Commands,
