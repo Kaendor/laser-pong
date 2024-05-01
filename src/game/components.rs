@@ -14,3 +14,9 @@ pub struct LeftWall;
 
 #[derive(Component, Clone)]
 pub struct RightWall;
+
+#[derive(Debug, Clone, Copy, Component)]
+pub enum Side {
+    Left,
+    Right,
+}

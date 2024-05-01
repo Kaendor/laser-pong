@@ -8,9 +8,12 @@ use bevy_xpbd_2d::prelude::*;
 use leafwing_input_manager::prelude::*;
 
 use super::{
-    components::{Ball, LeftWall, Paddle, RightWall},
-    GameAction,
+    components::{Ball, LeftWall, Paddle, RightWall, Side},
+    events::ScoreGoal,
+    GameAction, Score,
 };
+
+pub mod ui;
 
 pub fn spawn_camera(mut commands: Commands) {
     commands.spawn((
@@ -24,6 +27,60 @@ pub fn spawn_camera(mut commands: Commands) {
         },
         BloomSettings::default(),
     ));
+}
+
+pub fn score_goal(
+    mut collision_events: EventReader<Collision>,
+    left_walls: Query<Entity, With<LeftWall>>,
+    right_walls: Query<Entity, With<RightWall>>,
+    balls: Query<Entity, With<Ball>>,
+    mut score_event: EventWriter<ScoreGoal>,
+) {
+    for Collision(contact) in collision_events.read() {
+        if balls.get(contact.entity1).is_err() && balls.get(contact.entity2).is_err() {
+            debug!("No ball in collision event");
+            continue;
+        }
+
+        if left_walls
+            .get(contact.entity1)
+            .or_else(|_| left_walls.get(contact.entity2))
+            .is_ok()
+        {
+            score_event.send(ScoreGoal {
+                goal_for: Side::Right,
+            });
+
+            continue;
+        }
+
+        if right_walls
+            .get(contact.entity1)
+            .or_else(|_| right_walls.get(contact.entity2))
+            .is_ok()
+        {
+            score_event.send(ScoreGoal {
+                goal_for: Side::Left,
+            });
+
+            continue;
+        }
+    }
+}
+
+pub fn scoring(mut score_event: EventReader<ScoreGoal>, mut score: ResMut<Score>) {
+    for ScoreGoal { goal_for } in score_event.read() {
+        match goal_for {
+            Side::Left => {
+                info!("Right scored");
+                score.right += 1;
+            }
+            Side::Right => {
+                info!("Left scored");
+                score.left += 1;
+            }
+        }
+    }
 }
 
 pub fn spawn_ball(
@@ -125,15 +182,13 @@ pub fn spawn_ball(
         RightWall,
     ));
 
-    info!("Half width: {}", half_width);
-
     let paddle = Paddle {
         width: 20.,
         height: 320.,
     };
 
     // Paddles
-    //
+
     let right_input_map = InputMap::new([
         (GameAction::PaddleUp, KeyCode::KeyY),
         (GameAction::PaddleDown, KeyCode::KeyI),
